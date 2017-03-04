@@ -80,6 +80,7 @@ char** div_format(char** s) {
     size_t resultCount = 0;
 
     size_t divLevel = 0;
+    bool divError = false;
 
     for (char** pLine = s; *pLine != NULL; ++pLine) {
         char* line = *pLine;
@@ -89,15 +90,15 @@ char** div_format(char** s) {
 
         bool isInTag = false;
         bool wasSlash = false;
-        bool hadAlnumChar = false;
+        bool hadNonSpaceChar = false;
         bool wasOpenTag = false;
         bool wasCloseTag = false;
 
         for (char* pChar = line; *pChar != '\0'; ++pChar) {
             char c = *pChar;
 
-            if (!isInTag && !hadAlnumChar && c != ' ') {
-                hadAlnumChar = true;
+            if (!isInTag && !hadNonSpaceChar && c != ' ') {
+                hadNonSpaceChar = true;
                 lineStart = pChar;
                 lineEnd = lineStart;
             }
@@ -106,7 +107,7 @@ char** div_format(char** s) {
                 case '<':
                     isInTag = true;
                     wasSlash = false;
-                    hadAlnumChar = false;
+                    hadNonSpaceChar = false;
                     if (pChar != line) {
                         for (char* p1Char = pChar - 1; p1Char != line; --p1Char) {
                             char c1 = *p1Char;
@@ -123,8 +124,12 @@ char** div_format(char** s) {
                 case '>':
                     if (isInTag) {
                         if (wasSlash) {
-                            divLevel--;
-                            wasCloseTag = true;
+                            if (divLevel == 0) {
+                                divError = true;
+                            } else {
+                                divLevel--;
+                                wasCloseTag = true;
+                            }
                         } else {
                             divLevel++;
                             wasOpenTag = true;
@@ -144,51 +149,79 @@ char** div_format(char** s) {
                     break;
             }
 
+            if (divError) {
+                break;
+            }
+
             if (wasOpenTag) {
-                if (resultCount % kResultBuffer == 0) {
-                    result = realloc(result, sizeof(char*) * (resultCount + kResultBuffer));
-                }
+                wasOpenTag = false;
+
                 char* newLine = malloc(sizeof(char) * (7 + (divLevel - 1) * 4));
                 for (size_t i = 0; i < (divLevel - 1) * 4; ++i) {
                     newLine[i] = ' ';
                 }
                 memcpy(newLine + (divLevel - 1) * 4, "<div>\n", 7);
-                result[resultCount++] = newLine;
-                wasOpenTag = false;
-            }
 
-            if (lineStart != lineEnd) {
                 if (resultCount % kResultBuffer == 0) {
                     result = realloc(result, sizeof(char*) * (resultCount + kResultBuffer));
                 }
+                result[resultCount++] = newLine;
+            }
+
+            if (lineStart != lineEnd) {
                 size_t strLen = lineEnd - lineStart;
                 char* newLine = malloc(sizeof(char) * (strLen + 1 + divLevel * 4));
                 for (size_t i = 0; i < divLevel * 4; ++i) {
                     newLine[i] = ' ';
                 }
-                newLine[strLen + divLevel * 4] = '\n';
                 memcpy(newLine + divLevel * 4, lineStart, sizeof(char) * strLen);
+                newLine[strLen + divLevel * 4] = '\n';
+
+                if (resultCount % kResultBuffer == 0) {
+                    result = realloc(result, sizeof(char*) * (resultCount + kResultBuffer));
+                }
                 result[resultCount++] = newLine;
+
                 lineStart = ++lineEnd;
             }
 
             if (wasCloseTag) {
-                if (resultCount % kResultBuffer == 0) {
-                    result = realloc(result, sizeof(char*) * (resultCount + kResultBuffer));
-                }
+                wasCloseTag = false;
+
                 char* newLine = malloc(sizeof(char) * (8 + divLevel * 4));
                 for (size_t i = 0; i < divLevel * 4; ++i) {
                     newLine[i] = ' ';
                 }
                 memcpy(newLine + divLevel * 4, "</div>\n", 8);
+
+                if (resultCount % kResultBuffer == 0) {
+                    result = realloc(result, sizeof(char*) * (resultCount + kResultBuffer));
+                }
                 result[resultCount++] = newLine;
-                wasCloseTag = false;
             }
         }
+
+        if (divError) {
+            break;
+        }
+    }
+
+    if (divLevel != 0) {
+        divError = true;
+    }
+
+    if (divError) {
+        free_str_array(result);
+        result = malloc(sizeof(char*));
+        result[0] = malloc(sizeof(char) * 8);
+        memcpy(result[0], "[error]", 8);
+        resultCount = 1;
     }
 
     if (result == NULL) {
         result = malloc(sizeof(char*));
+    } else if (resultCount % kResultBuffer == 0) {
+        result = realloc(result, sizeof(char*) * (resultCount + 1));
     }
     result[resultCount] = NULL;
 
