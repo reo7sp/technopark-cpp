@@ -158,6 +158,12 @@ void var_def_destruct(var_def* pVarDef) {
     free(pVarDef->name);
 }
 
+void var_def_copy_name(var_def* pVarDef, char* name, size_t len) {
+    pVarDef->name = malloc(sizeof(char) * (len + 1));
+    memcpy(pVarDef->name, name, len);
+    pVarDef->name[len] = '\0';
+}
+
 
 typedef struct {
     var_def* data;
@@ -175,7 +181,7 @@ void var_def_array_construct(var_def_array* pArray) {
 
 void var_def_array_destruct(var_def_array* pArray) {
     for (size_t i = 0; i < pArray->count; i++) {
-        var_def_destruct(pArray[i].data);
+        var_def_destruct(&pArray->data[i]);
     }
     free(pArray->data);
 }
@@ -192,17 +198,16 @@ void var_def_array_push(var_def_array* pArray, var_def object) {
     pArray->data[pArray->count++] = object;
 }
 
-int var_def_array_find(var_def_array* pArray, char* name) {
+var_def* var_def_array_find(var_def_array* pArray, char* name) {
     for (size_t i = 0; i < pArray->count; i++) {
-        char* varName = pArray[i].data->name;
+        char* varName = pArray->data[i].name;
         size_t varNameLen = strlen(varName);
         char* nameEnd = name + varNameLen;
-        int varValue = pArray[i].data->value;
-        if (memcmp(varName, name, strlen(varName)) == 0 && (*nameEnd == '\0' || *nameEnd == ' ')) {
-            return varValue;
+        if (memcmp(varName, name, strlen(varName)) == 0 && !islower(*nameEnd)) {
+            return &pArray->data[i];
         }
     }
-    return -1;
+    return NULL;
 }
 
 
@@ -260,7 +265,8 @@ char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
 
     for (char* pChar = infixNotation; *pChar != '\0'; pChar++) {
         char c = *pChar;
-        if (c == '(') {
+        if (c == ' ') {
+        } else if (c == '(') {
             string_array_push_copy(&operations, "(");
         } else if (c == ')') {
             while (operations.count > 0) {
@@ -272,15 +278,17 @@ char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
                 growable_string_append_string(&polskiNotation, op);
                 free(op);
             }
-        } else if (memcmp(pChar, "and", 3)) {
+        } else if (memcmp(pChar, "and", 3) == 0) {
             string_array_push_copy(&operations, "*");
-        } else if (memcmp(pChar, "xor", 3)) {
+            pChar += 3 - 1;
+        } else if (memcmp(pChar, "xor", 3) == 0) {
             if (operations.count > 0 && string_array_get_last(&operations)[0] == '*') {
                 string_array_delete_last(&operations);
                 growable_string_append_char(&polskiNotation, '*');
             }
             string_array_push_copy(&operations, "^");
-        } else if (memcmp(pChar, "or", 2)) {
+            pChar += 3 - 1;
+        } else if (memcmp(pChar, "or", 2) == 0) {
             if (operations.count > 0 && string_array_get_last(&operations)[0] == '*') {
                 string_array_delete_last(&operations);
                 growable_string_append_char(&polskiNotation, '*');
@@ -290,10 +298,16 @@ char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
                 growable_string_append_char(&polskiNotation, '^');
             }
             string_array_push_copy(&operations, "+");
-        } else if (memcmp(pChar, "not", 2)) {
-            string_array_push_copy(&operations, "-");
+            pChar += 2 - 1;
+        } else if (memcmp(pChar, "not", 3) == 0) {
+//            string_array_push_copy(&operations, "-");
+            pChar += 3 - 1;
         } else {
-            switch (var_def_array_find(pVarDefs, pChar)) {
+            var_def* v = var_def_array_find(pVarDefs, pChar);
+            if (v == NULL) {
+                continue;
+            }
+            switch (v->value) {
                 case 0:
                     growable_string_append_char(&polskiNotation, '0');
                     break;
@@ -305,7 +319,7 @@ char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
                 default:
                     break;
             }
-            break;
+            pChar += strlen(v->name) - 1;
         }
     }
 
@@ -320,7 +334,7 @@ char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
     return polskiNotation.data;
 }
 
-int calculate_polski_notation(char* polskiNotation, var_def_array* pVarDefs) {
+bool calculate_polski_notation(char* polskiNotation) {
     int_array stack;
     int_array_construct(&stack);
     for (char* pChar = polskiNotation; *pChar != '\0'; pChar++) {
@@ -331,7 +345,7 @@ int calculate_polski_notation(char* polskiNotation, var_def_array* pVarDefs) {
                 break;
 
             case '1':
-                int_array_push(&stack, 0);
+                int_array_push(&stack, 1);
                 break;
 
             case '*':
@@ -367,7 +381,7 @@ int calculate_polski_notation(char* polskiNotation, var_def_array* pVarDefs) {
                 break;
         }
     }
-    int result = stack.data[0];
+    bool result = (bool) (stack.count > 0 ? stack.data[0] : 0);
     int_array_destruct(&stack);
     return result;
 }
@@ -398,9 +412,7 @@ int evaluate__parse_var_def(char* line, var_def_array* pArray) {
     keyEnd++; // end is exclusive
 
     size_t keyLen = keyEnd - keyStart;
-    newVarDef.name = malloc(sizeof(char) * (keyLen + 1));
-    memcpy(newVarDef.name, keyStart, keyLen);
-    newVarDef.name[keyLen] = '\0';
+    var_def_copy_name(&newVarDef, keyStart, keyLen);
 
     for (char* pChar = newVarDef.name; *pChar != '\0'; pChar++) {
         if (!islower(*pChar)) {
@@ -422,15 +434,15 @@ int evaluate__parse_var_def(char* line, var_def_array* pArray) {
     for (valueStart = equalSign + 1; *valueStart == ' '; valueStart++); // skip spaces
 
     if (memcmp(valueStart, "True", 4) == 0) {
-        if (valueStart[4] != ' ' && valueStart[4] != '\0') {
+        if (valueStart[4] != ' ' && valueStart[4] != ';' && valueStart[4] != '\0') {
             return EVALUATE__PARSE_VAR_DEF__PARSE_ERROR;
         }
-        newVarDef.value = 1;
+        newVarDef.value = true;
     } else if (memcmp(valueStart, "False", 5) == 0) {
-        if (valueStart[5] != ' ' && valueStart[5] != '\0') {
+        if (valueStart[5] != ' ' && valueStart[5] != ';' && valueStart[5] != '\0') {
             return EVALUATE__PARSE_VAR_DEF__PARSE_ERROR;
         }
-        newVarDef.value = 0;
+        newVarDef.value = false;
     }
 
     // Ok
@@ -438,33 +450,53 @@ int evaluate__parse_var_def(char* line, var_def_array* pArray) {
     return EVALUATE__PARSE_VAR_DEF__OK;
 }
 
-int evaluate__parse_question(char* line, var_def_array* pVarDefs) {
+bool evaluate__parse_question(char* line, var_def_array* pVarDefs) {
     char* polskiNotation = create_polksi_notation(line, pVarDefs);
-    int result = calculate_polski_notation(polskiNotation, pVarDefs);
+    bool result = calculate_polski_notation(polskiNotation);
     free(polskiNotation);
     return result;
 }
 
-int evaluate(char** code) {
+char* evaluate(char** code) {
     var_def_array var_defs;
     var_def_array_construct(&var_defs);
+
+    var_def trueVarDef;
+    var_def_copy_name(&trueVarDef, "True", 4);
+    trueVarDef.value = true;
+    var_def_array_push(&var_defs, trueVarDef);
+
+    var_def falseVarDef;
+    var_def_copy_name(&falseVarDef, "False", 5);
+    falseVarDef.value = false;
+    var_def_array_push(&var_defs, falseVarDef);
+
+    bool result = 0;
 
     for (char** pLine = code; *pLine != NULL; ++pLine) {
         char* line = *pLine;
 
         int parseVarDefCode = evaluate__parse_var_def(line, &var_defs);
         if (parseVarDefCode == EVALUATE__PARSE_VAR_DEF__NOT_VAR) {
-            evaluate__parse_question(line, &var_defs);
+            result = evaluate__parse_question(line, &var_defs);
         }
     }
 
     var_def_array_destruct(&var_defs);
+
+    switch (result) {
+        case false:
+            return "False";
+
+        case true:
+            return "True";
+    }
 }
 
 
 int main() {
     char** input = read_all_stdin();
-    printf("%d\n", evaluate(input));
+    printf("%s\n", evaluate(input));
     free_str_array(input);
     return 0;
 }
