@@ -300,7 +300,7 @@ char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
             string_array_push_copy(&operations, "+");
             pChar += 2 - 1;
         } else if (memcmp(pChar, "not", 3) == 0) {
-//            string_array_push_copy(&operations, "-");
+            string_array_push_copy(&operations, "-");
             pChar += 3 - 1;
         } else {
             var_def* v = var_def_array_find(pVarDefs, pChar);
@@ -308,11 +308,11 @@ char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
                 continue;
             }
             switch (v->value) {
-                case 0:
+                case false:
                     growable_string_append_char(&polskiNotation, '0');
                     break;
 
-                case 1:
+                case true:
                     growable_string_append_char(&polskiNotation, '1');
                     break;
 
@@ -377,11 +377,14 @@ bool calculate_polski_notation(char* polskiNotation) {
                 break;
 
             case '-':
-                // TODO
+                int_array_push(&stack, int_array_pop(&stack) ? false : true);
+                break;
+
+            default:
                 break;
         }
     }
-    bool result = (bool) (stack.count > 0 ? stack.data[0] : 0);
+    bool result = (bool) (stack.count > 0 ? stack.data[0] : false);
     int_array_destruct(&stack);
     return result;
 }
@@ -479,6 +482,7 @@ char* evaluate(char** code) {
         int parseVarDefCode = evaluate__parse_var_def(line, &var_defs);
         if (parseVarDefCode == EVALUATE__PARSE_VAR_DEF__NOT_VAR) {
             result = evaluate__parse_question(line, &var_defs);
+            break;
         }
     }
 
@@ -490,6 +494,9 @@ char* evaluate(char** code) {
 
         case true:
             return "True";
+
+        default:
+            return "wtf";
     }
 }
 

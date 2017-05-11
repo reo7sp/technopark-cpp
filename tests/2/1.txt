@@ -1,0 +1,3 @@
+iscat=True;
+isdog=False;
+(not iscat and isdog) or True

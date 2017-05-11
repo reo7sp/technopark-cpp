@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
+#include <assert.h>
 
 
 typedef char bool;
@@ -8,62 +9,145 @@ typedef char bool;
 #define false 0
 
 
+typedef struct {
+    char* data;
+    size_t length;
+    size_t capacity;
+    size_t growSize;
+} growable_string;
+
+void growable_string_construct(growable_string* pString) {
+    pString->growSize = 128;
+    pString->capacity = pString->growSize;
+    pString->length = 0;
+    pString->data = malloc(sizeof(char) * pString->capacity);
+    pString->data[0] = '\0';
+}
+
+void growable_string_destruct(growable_string* pString) {
+    free(pString->data);
+}
+
+void growable_string_grow(growable_string* pString) {
+    pString->capacity += pString->growSize;
+    pString->data = realloc(pString->data, sizeof(char) * pString->capacity);
+}
+
+void growable_string_append_char(growable_string* pString, char c) {
+    if (pString->length == pString->capacity - 1) {
+        growable_string_grow(pString);
+    }
+    pString->data[pString->length++] = c;
+    pString->data[pString->length] = '\0';
+}
+
+void growable_string_append_string(growable_string* pString, char* str) {
+    for (char* pChar = str; *pChar != '\0'; pChar++) {
+        growable_string_append_char(pString, *pChar);
+    }
+}
+
+char* growable_string_get_end(growable_string* pString) {
+    return pString->data + pString->length;
+}
+
+
+typedef struct {
+    char** data;
+    size_t count;
+    size_t capacity;
+    size_t growSize;
+} string_array;
+
+void string_array_construct(string_array* pArray) {
+    pArray->growSize = 128;
+    pArray->capacity = pArray->growSize;
+    pArray->count = 0;
+    pArray->data = malloc(sizeof(char*) * pArray->capacity);
+    pArray->data[0] = NULL;
+}
+
+void string_array_destruct(string_array* pArray) {
+    for (size_t i = 0; i < pArray->count; i++) {
+        free(pArray->data + i);
+    }
+    free(pArray->data);
+}
+
+void string_array_shallow_destruct(string_array* pArray) {
+    free(pArray->data);
+}
+
+void string_array_grow(string_array* pArray) {
+    pArray->capacity += pArray->growSize;
+    pArray->data = realloc(pArray->data, sizeof(char*) * pArray->capacity);
+}
+
+void string_array_push(string_array* pArray, char* object) {
+    if (pArray->count == pArray->capacity - 1) {
+        string_array_grow(pArray);
+    }
+    pArray->data[pArray->count++] = object;
+    pArray->data[pArray->count] = NULL;
+}
+
+void string_array_push_copy(string_array* pArray, char* object) {
+    char* copy = malloc(sizeof(char) * strlen(object));
+    strcpy(copy, object);
+    string_array_push(pArray, copy);
+}
+
+char* string_array_get_last(string_array* pArray) {
+    assert(pArray->count > 0);
+    return pArray->data[--pArray->count];
+}
+
+char* string_array_pop(string_array* pArray) {
+    assert(pArray->count > 0);
+    return pArray->data[--pArray->count];
+}
+
+void string_array_delete_last(string_array* pArray) {
+    free(string_array_pop(pArray));
+}
+
+
 char** read_all_stdin() {
-    const size_t kBufferSize = 128;
-    const size_t kLinesBufferSize = 128;
+    string_array result;
+    string_array_construct(&result);
 
-    char** lines = NULL;
-    size_t linesCount = 0;
-
-    char* currentContents = NULL;
-    size_t currentIndex = 0;
-    size_t currentSize = 0;
+    growable_string currentLine;
+    growable_string_construct(&currentLine);
 
     while (!feof(stdin)) {
-        currentSize += kBufferSize;
-        currentContents = realloc(currentContents, sizeof(char) * currentSize);
-        fgets(currentContents + currentIndex, kBufferSize, stdin);
+        growable_string_grow(&currentLine);
 
-        size_t prevIndex = currentIndex;
-        currentIndex += kBufferSize - 1;
+        char* strEnd = growable_string_get_end(&currentLine);
+        int readCount = (int) currentLine.growSize;
+        fgets(strEnd, readCount, stdin);
+        currentLine.length += readCount;
 
-        for (size_t i = currentSize - 1; ; --i) {
-            if (currentContents[i] == '\n') {
-                if (linesCount % kLinesBufferSize == 0) {
-                    lines = realloc(lines, sizeof(char*) * (linesCount + kLinesBufferSize));
-                }
-                lines[linesCount++] = currentContents;
+        char* oldStrEnd = strEnd;
+        strEnd = growable_string_get_end(&currentLine);
 
-                currentContents = NULL;
-                currentIndex = 0;
-                currentSize = 0;
+        for (char* pChar = strEnd; oldStrEnd <= pChar && pChar <= strEnd; pChar--) {
+            if (*pChar == '\n') {
+                string_array_push(&result, currentLine.data);
 
-                break;
-            }
-
-            if (i == prevIndex) {
+                growable_string_construct(&currentLine);
                 break;
             }
         }
     }
 
-    if (linesCount == 0) {
-        lines = malloc(sizeof(char*));
-    } else if (linesCount % kLinesBufferSize == 0) {
-        lines = realloc(lines, sizeof(char*) * (linesCount + 1));
-    }
-    lines[linesCount] = NULL;
-
-    return lines;
+    return result.data;
 }
 
-
-void write_lines(char **contents) {
+void write_lines(char** contents) {
     for (char** pLine = contents; *pLine != NULL; ++pLine) {
         fputs(*pLine, stdout);
     }
 }
-
 
 void free_str_array(char** arr) {
     for (char** pLine = arr; *pLine != NULL; ++pLine) {
