@@ -158,10 +158,8 @@ void free_str_array(char** arr) {
 
 
 char** div_format(char** s) {
-    const size_t kResultBuffer = 128;
-
-    char** result = NULL;
-    size_t resultCount = 0;
+    string_array result;
+    string_array_construct(&result);
 
     size_t divLevel = 0;
     bool divError = false;
@@ -169,8 +167,8 @@ char** div_format(char** s) {
     for (char** pLine = s; *pLine != NULL; ++pLine) {
         char* line = *pLine;
 
-        char* lineStart = line;
-        char* lineEnd = lineStart;
+        char* newLineContentsStart = line;
+        char* newLineContentsEnd = newLineContentsStart;
 
         bool isInTag = false;
         bool wasSlash = false;
@@ -181,54 +179,75 @@ char** div_format(char** s) {
         for (char* pChar = line; *pChar != '\0'; ++pChar) {
             char c = *pChar;
 
-            if (!isInTag && !hadNonSpaceChar && c != ' ') {
-                hadNonSpaceChar = true;
-                lineStart = pChar;
-                lineEnd = lineStart;
+            if (!isInTag && !hadNonSpaceChar) {
+                if (c != ' ') {
+                    hadNonSpaceChar = true;
+                    newLineContentsStart = pChar;
+                    newLineContentsEnd = pChar;
+                }
             }
 
             switch (c) {
-                case '<':
+                case '<': {
                     isInTag = true;
                     wasSlash = false;
                     hadNonSpaceChar = false;
-                    if (pChar != line) {
+
+                    const bool isFirstCharInLine = pChar != line;
+                    if (isFirstCharInLine) {
+                        char* nonSpace = NULL;
                         for (char* p1Char = pChar - 1; p1Char != line; --p1Char) {
                             char c1 = *p1Char;
                             if (c1 != ' ') {
-                                lineEnd = pChar;
+                                nonSpace = pChar;
                                 break;
                             }
                         }
+                        if (nonSpace != NULL) {
+                            newLineContentsEnd = nonSpace;
+                        }
                     }
                     break;
-                case '/':
+                }
+
+                case '/': {
                     wasSlash = true;
                     break;
-                case '>':
+                }
+
+                case '>': {
                     if (isInTag) {
+                        isInTag = false;
                         if (wasSlash) {
                             if (divLevel == 0) {
                                 divError = true;
                             } else {
-                                divLevel--;
                                 wasCloseTag = true;
+                                divLevel--;
                             }
                         } else {
-                            divLevel++;
                             wasOpenTag = true;
+                            divLevel++;
                         }
-                        isInTag = false;
                     }
                     break;
-                case '\n':
+                }
+
+                case '\n': {
+                    char* nonSpace = NULL;
                     for (char* p1Char = pChar - 1; p1Char != line; --p1Char) {
                         char c1 = *p1Char;
                         if (c1 != ' ') {
-                            lineEnd = pChar;
+                            nonSpace = pChar;
                             break;
                         }
                     }
+                    if (nonSpace != NULL) {
+                        newLineContentsEnd = nonSpace;
+                    }
+                    break;
+                }
+
                 default:
                     break;
             }
@@ -240,48 +259,44 @@ char** div_format(char** s) {
             if (wasOpenTag) {
                 wasOpenTag = false;
 
-                char* newLine = malloc(sizeof(char) * (7 + (divLevel - 1) * 4));
-                for (size_t i = 0; i < (divLevel - 1) * 4; ++i) {
-                    newLine[i] = ' ';
-                }
-                memcpy(newLine + (divLevel - 1) * 4, "<div>\n", 7);
+                char* divString = "<div>\n";
+                size_t indentSpacesCount = (divLevel - 1) * 4;
 
-                if (resultCount % kResultBuffer == 0) {
-                    result = realloc(result, sizeof(char*) * (resultCount + kResultBuffer));
-                }
-                result[resultCount++] = newLine;
+                size_t newLineLen = strlen(divString) + indentSpacesCount;
+                char* newLine = malloc(sizeof(char) * (newLineLen + 1));
+                memset(newLine, ' ', sizeof(char) * indentSpacesCount);
+                memcpy(newLine + indentSpacesCount, divString, sizeof(char) * strlen(divString));
+                newLine[newLineLen] = '\0';
+                string_array_push(&result, newLine);
             }
 
-            if (lineStart != lineEnd) {
-                size_t strLen = lineEnd - lineStart;
-                char* newLine = malloc(sizeof(char) * (strLen + 1 + divLevel * 4));
-                for (size_t i = 0; i < divLevel * 4; ++i) {
-                    newLine[i] = ' ';
-                }
-                memcpy(newLine + divLevel * 4, lineStart, sizeof(char) * strLen);
-                newLine[strLen + divLevel * 4] = '\n';
+            if (newLineContentsStart != newLineContentsEnd) {
+                size_t contentsLen = newLineContentsEnd - newLineContentsStart;
+                size_t indentSpacesCount = divLevel * 4;
 
-                if (resultCount % kResultBuffer == 0) {
-                    result = realloc(result, sizeof(char*) * (resultCount + kResultBuffer));
-                }
-                result[resultCount++] = newLine;
+                size_t newLineLen = contentsLen + indentSpacesCount;
+                char* newLine = malloc(sizeof(char) * (newLineLen + 1));
+                memset(newLine, ' ', sizeof(char) * indentSpacesCount);
+                memcpy(newLine + indentSpacesCount, newLineContentsStart, sizeof(char) * contentsLen);
+                newLine[newLineLen - 1] = '\n';
+                newLine[newLineLen] = '\0';
+                string_array_push(&result, newLine);
 
-                lineStart = ++lineEnd;
+                newLineContentsStart = ++newLineContentsEnd;
             }
 
             if (wasCloseTag) {
                 wasCloseTag = false;
 
-                char* newLine = malloc(sizeof(char) * (8 + divLevel * 4));
-                for (size_t i = 0; i < divLevel * 4; ++i) {
-                    newLine[i] = ' ';
-                }
-                memcpy(newLine + divLevel * 4, "</div>\n", 8);
+                char* divString = "</div>\n";
+                size_t indentSpacesCount = divLevel * 4;
 
-                if (resultCount % kResultBuffer == 0) {
-                    result = realloc(result, sizeof(char*) * (resultCount + kResultBuffer));
-                }
-                result[resultCount++] = newLine;
+                size_t newLineLen = strlen(divString) + indentSpacesCount;
+                char* newLine = malloc(sizeof(char) * (newLineLen + 1));
+                memset(newLine, ' ', sizeof(char) * indentSpacesCount);
+                memcpy(newLine + indentSpacesCount, divString, sizeof(char) * strlen(divString));
+                newLine[newLineLen] = '\0';
+                string_array_push(&result, newLine);
             }
         }
 
@@ -291,25 +306,12 @@ char** div_format(char** s) {
     }
 
     if (divLevel != 0) {
-        divError = true;
+        string_array_destruct(&result);
+        string_array_construct(&result);
+        string_array_push_copy(&result, "[error]");
     }
 
-    if (divError) {
-        free_str_array(result);
-        result = malloc(sizeof(char*));
-        result[0] = malloc(sizeof(char) * 8);
-        memcpy(result[0], "[error]", 8);
-        resultCount = 1;
-    }
-
-    if (result == NULL) {
-        result = malloc(sizeof(char*));
-    } else if (resultCount % kResultBuffer == 0) {
-        result = realloc(result, sizeof(char*) * (resultCount + 1));
-    }
-    result[resultCount] = NULL;
-
-    return result;
+    return result.data;
 }
 
 
