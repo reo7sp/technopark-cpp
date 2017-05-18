@@ -30,13 +30,17 @@ void int_array_destruct(int_array* pArray) {
 
 void int_array_grow(int_array* pArray) {
     pArray->capacity += pArray->growSize;
-    pArray->data = realloc(pArray->data, sizeof(char) * pArray->capacity);
+    pArray->data = realloc(pArray->data, sizeof(int) * pArray->capacity);
+}
+
+void int_array_try_grow(int_array* pArray) {
+    if (pArray->count + 1 >= pArray->capacity) {
+        int_array_grow(pArray);
+    }
 }
 
 void int_array_push(int_array* pArray, int object) {
-    if (pArray->count == pArray->capacity) {
-        int_array_grow(pArray);
-    }
+    int_array_try_grow(pArray);
     pArray->data[pArray->count++] = object;
 }
 
@@ -70,10 +74,14 @@ void growable_string_grow(growable_string* pString) {
     pString->data = realloc(pString->data, sizeof(char) * pString->capacity);
 }
 
-void growable_string_append_char(growable_string* pString, char c) {
-    if (pString->length == pString->capacity - 1) {
+void growable_string_try_grow(growable_string* pString) {
+    if (pString->length + 2 >= pString->capacity) {
         growable_string_grow(pString);
     }
+}
+
+void growable_string_append_char(growable_string* pString, char c) {
+    growable_string_try_grow(pString);
     pString->data[pString->length++] = c;
     pString->data[pString->length] = '\0';
 }
@@ -86,6 +94,14 @@ void growable_string_append_string(growable_string* pString, char* str) {
 
 char* growable_string_get_end(growable_string* pString) {
     return pString->data + pString->length;
+}
+
+size_t growable_string_get_left_space_count(growable_string* pString) {
+    if (pString->capacity >= pString->length) {
+        return pString->capacity - pString->length;
+    } else {
+        return 0;
+    }
 }
 
 
@@ -120,23 +136,27 @@ void string_array_grow(string_array* pArray) {
     pArray->data = realloc(pArray->data, sizeof(char*) * pArray->capacity);
 }
 
-void string_array_push(string_array* pArray, char* object) {
-    if (pArray->count == pArray->capacity - 1) {
+void string_array_try_grow(string_array* pArray) {
+    if (pArray->count + 2 >= pArray->capacity) {
         string_array_grow(pArray);
     }
+}
+
+void string_array_push(string_array* pArray, char* object) {
+    string_array_try_grow(pArray);
     pArray->data[pArray->count++] = object;
     pArray->data[pArray->count] = NULL;
 }
 
 void string_array_push_copy(string_array* pArray, char* object) {
-    char* copy = malloc(sizeof(char) * strlen(object));
+    char* copy = malloc(sizeof(char) * (strlen(object) + 1));
     strcpy(copy, object);
     string_array_push(pArray, copy);
 }
 
 char* string_array_get_last(string_array* pArray) {
     assert(pArray->count > 0);
-    return pArray->data[--pArray->count];
+    return pArray->data[pArray->count - 1];
 }
 
 char* string_array_pop(string_array* pArray) {
@@ -200,10 +220,10 @@ void var_def_array_push(var_def_array* pArray, var_def object) {
 
 var_def* var_def_array_find(var_def_array* pArray, char* name) {
     for (size_t i = 0; i < pArray->count; i++) {
-        char* varName = pArray->data[i].name;
+        char* varName = pArray->data[pArray->count - i - 1].name; // search backwards
         size_t varNameLen = strlen(varName);
         char* nameEnd = name + varNameLen;
-        if (memcmp(varName, name, strlen(varName)) == 0 && !islower(*nameEnd)) {
+        if (memcmp(varName, name, varNameLen) == 0 && !islower(*nameEnd)) {
             return &pArray->data[i];
         }
     }
@@ -219,25 +239,30 @@ char** read_all_stdin() {
     growable_string_construct(&currentLine);
 
     while (!feof(stdin)) {
-        growable_string_grow(&currentLine);
+        size_t currentLineOldLength = currentLine.length;
 
+        char* readDest = growable_string_get_end(&currentLine);
+        int readCount = (int) growable_string_get_left_space_count(&currentLine);
+        fgets(readDest, readCount, stdin);
+        if (ferror(stdin)) {
+            break;
+        }
+        currentLine.length = strlen(currentLine.data);
+        growable_string_try_grow(&currentLine);
+
+        char* oldStrEnd = currentLine.data + currentLineOldLength;
         char* strEnd = growable_string_get_end(&currentLine);
-        int readCount = (int) currentLine.growSize;
-        fgets(strEnd, readCount, stdin);
-        currentLine.length += readCount;
-
-        char* oldStrEnd = strEnd;
-        strEnd = growable_string_get_end(&currentLine);
 
         for (char* pChar = strEnd; oldStrEnd <= pChar && pChar <= strEnd; pChar--) {
             if (*pChar == '\n') {
                 string_array_push(&result, currentLine.data);
-
                 growable_string_construct(&currentLine);
                 break;
             }
         }
     }
+
+    growable_string_destruct(&currentLine);
 
     return result.data;
 }
@@ -256,7 +281,9 @@ void free_str_array(char** arr) {
 }
 
 
-char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
+char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs, bool* error) {
+    *error = false;
+
     growable_string polskiNotation;
     growable_string_construct(&polskiNotation);
 
@@ -266,6 +293,7 @@ char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
     for (char* pChar = infixNotation; *pChar != '\0'; pChar++) {
         char c = *pChar;
         if (c == ' ') {
+        } else if (c == '\n') {
         } else if (c == '(') {
             string_array_push_copy(&operations, "(");
         } else if (c == ')') {
@@ -305,7 +333,8 @@ char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
         } else {
             var_def* v = var_def_array_find(pVarDefs, pChar);
             if (v == NULL) {
-                continue;
+                *error = true;
+                break;
             }
             switch (v->value) {
                 case false:
@@ -317,6 +346,7 @@ char* create_polksi_notation(char* infixNotation, var_def_array* pVarDefs) {
                     break;
 
                 default:
+                    // never be
                     break;
             }
             pChar += strlen(v->name) - 1;
@@ -394,7 +424,7 @@ bool calculate_polski_notation(char* polskiNotation) {
 #define EVALUATE__PARSE_VAR_DEF__NOT_VAR 1
 #define EVALUATE__PARSE_VAR_DEF__PARSE_ERROR 2
 
-int evaluate__parse_var_def(char* line, var_def_array* pArray) {
+int evaluate__parse_var_def(char* line, var_def_array* pVarDefs) {
     var_def newVarDef;
 
     char* equalSign = strchr(line, '=');
@@ -431,6 +461,9 @@ int evaluate__parse_var_def(char* line, var_def_array* pArray) {
     if (strcmp(newVarDef.name, "or") == 0) {
         return EVALUATE__PARSE_VAR_DEF__PARSE_ERROR;
     }
+    if (strcmp(newVarDef.name, "xor") == 0) {
+        return EVALUATE__PARSE_VAR_DEF__PARSE_ERROR;
+    }
 
     // Value parsing
     char* valueStart;
@@ -446,15 +479,17 @@ int evaluate__parse_var_def(char* line, var_def_array* pArray) {
             return EVALUATE__PARSE_VAR_DEF__PARSE_ERROR;
         }
         newVarDef.value = false;
+    } else {
+        return EVALUATE__PARSE_VAR_DEF__PARSE_ERROR;
     }
 
     // Ok
-    var_def_array_push(pArray, newVarDef);
+    var_def_array_push(pVarDefs, newVarDef);
     return EVALUATE__PARSE_VAR_DEF__OK;
 }
 
-bool evaluate__parse_question(char* line, var_def_array* pVarDefs) {
-    char* polskiNotation = create_polksi_notation(line, pVarDefs);
+bool evaluate__parse_question(char* line, var_def_array* pVarDefs, bool* error) {
+    char* polskiNotation = create_polksi_notation(line, pVarDefs, error);
     bool result = calculate_polski_notation(polskiNotation);
     free(polskiNotation);
     return result;
@@ -481,8 +516,17 @@ char* evaluate(char** code) {
 
         int parseVarDefCode = evaluate__parse_var_def(line, &var_defs);
         if (parseVarDefCode == EVALUATE__PARSE_VAR_DEF__NOT_VAR) {
-            result = evaluate__parse_question(line, &var_defs);
+            bool error = false;
+            result = evaluate__parse_question(line, &var_defs, &error);
+            if (error) {
+                var_def_array_destruct(&var_defs);
+                return "[error]";
+            }
             break;
+        }
+        if (parseVarDefCode == EVALUATE__PARSE_VAR_DEF__PARSE_ERROR) {
+            var_def_array_destruct(&var_defs);
+            return "[error]";
         }
     }
 
@@ -503,7 +547,7 @@ char* evaluate(char** code) {
 
 int main() {
     char** input = read_all_stdin();
-    printf("%s\n", evaluate(input));
+    printf("%s", evaluate(input));
     free_str_array(input);
     return 0;
 }
